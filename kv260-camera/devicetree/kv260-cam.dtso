@@ -150,7 +150,7 @@
 v_demosaic_0: v_demosaic@a0030000 {
         compatible = "xlnx,v-demosaic";
         reg = <0x0 0xa0030000 0x0 0x10000>;
-        reset-gpios = <&gpio 79 1>;
+        reset-gpios = <&gpio 80 1>;
         clocks = <&zynqmp_clk 71>;
         clock-names = "ap_clk";
 
@@ -196,7 +196,7 @@ v_demosaic_0: v_demosaic@a0030000 {
         /* Was "y10". Change to match whatever media-ctl -p reports on
          * v_demosaic_0's source pad once it's bound -- check the driver's
          * dts_name table before picking the string, don't guess. */
-        xlnx,vid-formats = "rgbx8";
+        xlnx,vid-formats = "rgb888";
 
         xlnx,max-width = <1920>;
         xlnx,max-height = <1080>;
