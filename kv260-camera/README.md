@@ -45,7 +45,7 @@ sudo xmutil unloadapp
 sudo xmutil loadapp kv260-cam
 ```
 
-6. Confirm everything
+6. Confirm everything; you should see ```kv260-cam``` and ```199999998```
 
 ```
 sudo xmutil listapps
