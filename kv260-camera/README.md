@@ -43,8 +43,6 @@ sudo chmod 600 /etc/netplan/01-static-ip.yaml
 sudo chmod 600 /etc/netplan/50-cloud-init.yaml
 
 sudo netplan apply
-wait
-ip addr show eth0
 ```
 
 5. Copy over files from this repo.
