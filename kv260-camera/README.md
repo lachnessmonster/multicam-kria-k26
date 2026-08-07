@@ -6,7 +6,8 @@ To get this working:
 
 4. Clone this onto your desktop:
 ```
-
+cd ~/Desktop
+git clone https://github.com/lachnessmonster/multicam-kria-k26.git
 ```
 
 6. Get an ssh link from your laptop to the kria:
