@@ -26,12 +26,29 @@ sudo ip link set enp0s31f6 up
 ssh unimelb-research@192.168.2.1
 ```
 
+With this ssh up, make the IP address permanent (so it doesn't leave after reboot)
+
+```
+sudo tee /etc/netplan/01-static-ip.yaml > /dev/null <<'EOF'
+network:
+  version: 2
+  ethernets:
+    eth0:
+      addresses:
+        - 192.168.2.1/24
+      dhcp4: no
+EOF
+sudo netplan apply
+ip addr show eth0
+```
+
 5. Copy over files from this repo.
 
 On laptop:
 ```
 scp -r  ~/Desktop/multicam-kria-k26 unimelb-research@192.168.2.1:~/Desktop
 ```
+
 
 6. Load everything
 
