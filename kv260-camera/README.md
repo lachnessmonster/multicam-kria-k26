@@ -38,6 +38,10 @@ network:
         - 192.168.2.1/24
       dhcp4: no
 EOF
+
+sudo chmod 600 /etc/netplan/01-static-ip.yaml
+sudo chmod 600 /etc/netplan/50-cloud-init.yaml
+
 sudo netplan apply
 ip addr show eth0
 ```
