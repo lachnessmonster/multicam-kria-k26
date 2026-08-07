@@ -77,6 +77,6 @@ sudo dd if=/dev/camcap of=/tmp/frame.raw bs=2764800 count=1
 
 14. Convert the raw Y10 frame to a viewable image (do this on the laptop, or on the kria if you have python3 + numpy + pillow). Y10 packs 3 pixels per 32-bit word:
 ```
-python3 view.py /tmp/frame.raw frame.png # greyscale
-python3 view.py /tmp/frame.raw color.png --color # demosaiced colour
+python3 view.py /tmp/frame.raw ~/Desktop/frame.png # greyscale
+python3 view.py /tmp/frame.raw ~/Desktop/color.png --color # demosaiced colour
 ```
