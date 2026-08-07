@@ -71,12 +71,9 @@ sudo busybox devmem 0xA0020024 32 0xFFFFFFFF
 
 13. Configure the sensor and start it streaming, then capture one frame (Y10: 2560 bytes/line x 1080 = 2,764,800 bytes):
 ```
+cd ~/Desktop/multicam-kria-k26/kv260-camera/software
 sudo bash stream_imx219.sh
 sudo dd if=/dev/camcap of=/tmp/frame.raw bs=2764800 count=1
-```
-
-14. Convert the raw Y10 frame to a viewable image (do this on the laptop, or on the kria if you have python3 + numpy + pillow). Y10 packs 3 pixels per 32-bit word:
-```
 python3 view.py /tmp/frame.raw ~/Desktop/frame.png # greyscale
 python3 view.py /tmp/frame.raw ~/Desktop/color.png --color # demosaiced colour
 ```
