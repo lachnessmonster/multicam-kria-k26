@@ -55,7 +55,7 @@ sudo cat /sys/kernel/debug/clk/clk_summary | grep pl1_ref_div2
 7. Load driver
 
 ```
-cd /home/lachlan/dev/kv260-camera-repo/software
+cd ~/Desktop/multicam-kria-k26/kv260-camera/software
 make
 sudo insmod camcap.ko
 sudo dmesg | tail -3 # expect "camcap: ready, 2764800 bytes"
