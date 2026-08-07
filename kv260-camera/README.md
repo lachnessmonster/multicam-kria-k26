@@ -13,7 +13,7 @@ cd multicam-kria-k26/kv260-camera/
 
 6. Get an ssh link from your laptop to the kria:
 
-On kria:
+On kria device (you will need to plug in keyboard and monitor):
 ```
 sudo ip addr add 192.168.2.1/24 dev eth0
 sudo ip link set eth0 up
@@ -28,15 +28,17 @@ ssh unimelb-research@192.168.2.1
 
 5. Copy over files from this repo.
 
+On laptop:
 ```
-scp -r  /home/lachlan/dev/kv260-camera-repo/ lachlan@192.168.2.1:/home/lachlan/dev
+scp -r  ~/Desktop/multicam-kria-k26 unimelb-research@192.168.2.1:~/Desktop
 ```
 
 6. Load everything
 
+On kria ssh:
 ```
 sudo mkdir -p /lib/firmware/xilinx/kv260-cam
-cd /home/lachlan/dev/kv260-camera-repo
+cd ~/Desktop/multicam-kria-k26/kv260-camera
 sudo cp hardware/kv260-cam.bit.bin software/kv260-cam.dtbo software/shell.json /lib/firmware/xilinx/kv260-cam/
 
 sudo xmutil unloadapp
