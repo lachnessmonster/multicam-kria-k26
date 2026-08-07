@@ -108,6 +108,8 @@ sudo ip link set enp0s31f6 up
 ssh unimelb-research@192.168.2.1
 ```
 
+2. load app again
+```
 sudo xmutil unloadapp
 sudo xmutil loadapp kv260-cam
 ```
