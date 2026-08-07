@@ -21,6 +21,8 @@ sudo ip link set eth0 up
 
 On laptop (note your eth device may not be enp0xx, use ```ip addr``` to check what yours is):
 ```
+sudo ip addr add 192.168.2.2/24 dev enp0s31f6
+sudo ip link set enp0s31f6 up
 ssh unimelb-research@192.168.2.1
 ```
 
