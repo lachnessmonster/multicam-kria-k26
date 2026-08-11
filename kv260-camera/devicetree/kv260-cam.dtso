@@ -6,15 +6,6 @@
  *
  * Chain: imx219 -> csi2rxss -> v_demosaic_0 -> vcap_csi -> v_frmbuf_wr_0
  *
- * v_demosaic_0 reg address is a PLACEHOLDER (0xa0030000) -- use whatever
- * Vivado's Address Editor actually assigns once the IP is placed.
- * clocks on v_demosaic_0 assume it shares pl_clk0/zynqmp_clk 71 like every
- * other IP in this design (per HARDWARE.md's clock table) -- confirm via
- * dtc/dmesg once built, don't trust this blind.
- * xlnx,video-width is carried over from a real working example but hasn't
- * been confirmed against this exact binding -- same rule: build, load,
- * read the actual probe error if it's wrong.
- *
  * REQUIRES: the AXI4-Stream Subset Converter between csi2rxss and frmbuf
  * removed/rewired in Vivado -- it has no DT representation, so nothing
  * here can catch a mismatch there. See chat note.
@@ -158,7 +149,7 @@
 
     v_demosaic_0: v_demosaic@a0030000 {
         compatible = "xlnx,v-demosaic";
-        reg = <0x0 0xa0030000 0x0 0x10000>;   /* PLACEHOLDER -- see note above */
+        reg = <0x0 0xa0030000 0x0 0x10000>;
 
         clocks = <&zynqmp_clk 71>;
         clock-names = "ap_clk";
