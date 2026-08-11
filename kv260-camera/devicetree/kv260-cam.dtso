@@ -2,21 +2,22 @@
 /plugin/;
 
 /*
- * kv260-cam.dtso  -- native V4L2 pipeline
+ * kv260-cam.dtso  -- native V4L2 pipeline with hardware demosaic
  *
- * Compatible string is -5.0. This is the only value the xilinx-csi2rxss
- * driver in kernel 5.15.0-1027-xilinx-zynqmp matches; -2.0/-3.0/-4.0 come
- * from a third-party fork and silently fail to match. The v3.0 IP register
- * map is compatible (CCR at 0x00, ISR at 0x24), so this is safe.
+ * Chain: imx219 -> csi2rxss -> v_demosaic_0 -> vcap_csi -> v_frmbuf_wr_0
  *
- * REQUIRES the rebuilt bitstream containing xlconcat_0. The original
- * design_1.tcl never wired mipi_csi2_rx_subsyst_0/csirxss_csi_irq to the
- * PS, which made xilinx-csi2rxss fail probe with "IRQ index 0 not found"
- * (-ENXIO, logged only at pr_debug level -- hence the silent failure).
+ * v_demosaic_0 reg address is a PLACEHOLDER (0xa0030000) -- use whatever
+ * Vivado's Address Editor actually assigns once the IP is placed.
+ * clocks on v_demosaic_0 assume it shares pl_clk0/zynqmp_clk 71 like every
+ * other IP in this design (per HARDWARE.md's clock table) -- confirm via
+ * dtc/dmesg once built, don't trust this blind.
+ * xlnx,video-width is carried over from a real working example but hasn't
+ * been confirmed against this exact binding -- same rule: build, load,
+ * read the actual probe error if it's wrong.
  *
- * camcap is commented out: it and vcap_csi both claim <&v_frmbuf_wr_0 0>
- * and cannot coexist. Swap which one is active depending on whether you
- * are using camcap.ko or /dev/video0.
+ * REQUIRES: the AXI4-Stream Subset Converter between csi2rxss and frmbuf
+ * removed/rewired in Vivado -- it has no DT representation, so nothing
+ * here can catch a mismatch there. See chat note.
  */
 
 &fpga_full {
@@ -125,23 +126,12 @@
         compatible = "xlnx,mipi-csi2-rx-subsystem-5.0";
         reg = <0x0 0xa0020000 0x0 0x2000>;
 
-        /*
-         * xlconcat_0 feeds pl_ps_irq0: In0 = axi_iic_0 (SPI 89),
-         * In1 = mipi_csi2_rx_subsyst_0/csirxss_csi_irq (SPI 90).
-         * If the CSI interrupt never fires, check In0/In1 are not swapped
-         * in the block design -- try 89 instead of 90.
-         * Verify with: grep -i csi /proc/interrupts
-         */
         interrupt-parent = <&gic>;
         interrupts = <0 90 4>;
 
-        /* 0x2b = RAW10, matches CONFIG.CMN_PXL_FORMAT in design_1.tcl */
-        xlnx,csi-pxl-format = <0x2b>;
-
-        /* Video Format Bridge enabled: CSI drives an AXI4-Stream video_out */
+        xlnx,csi-pxl-format = <0x2b>;   /* RAW10 */
         xlnx,vfb;
 
-        /* Both are pl_clk0 in design_1.tcl */
         clock-names = "lite_aclk", "video_aclk";
         clocks = <&zynqmp_clk 71>, <&zynqmp_clk 71>;
 
@@ -150,7 +140,6 @@
             #size-cells = <0>;
 
             port@0 {
-                /* Sink: from the sensor */
                 reg = <0>;
                 csi_in: endpoint {
                     remote-endpoint = <&imx219_0>;
@@ -159,9 +148,40 @@
             };
 
             port@1 {
-                /* Source: to the capture node */
                 reg = <1>;
                 csi_out: endpoint {
+                    remote-endpoint = <&demosaic_in>;
+                };
+            };
+        };
+    };
+
+    v_demosaic_0: v_demosaic@a0030000 {
+        compatible = "xlnx,v-demosaic";
+        reg = <0x0 0xa0030000 0x0 0x10000>;   /* PLACEHOLDER -- see note above */
+
+        clocks = <&zynqmp_clk 71>;
+        clock-names = "ap_clk";
+
+        xlnx,max-width = <1920>;
+        xlnx,max-height = <1080>;
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                xlnx,video-width = <10>;
+                demosaic_in: endpoint {
+                    remote-endpoint = <&csi_out>;
+                };
+            };
+
+            port@1 {
+                reg = <1>;
+                xlnx,video-width = <10>;
+                demosaic_out: endpoint {
                     remote-endpoint = <&vcap_csi_in>;
                 };
             };
@@ -181,18 +201,17 @@
         xlnx,dma-addr-width = <32>;
         xlnx,dma-align = <8>;
         xlnx,pixels-per-clock = <1>;
-        xlnx,vid-formats = "y10";
-        xlnx,has-y10 = <1>;
+
+        /* Was "y10". Change to match whatever media-ctl -p reports on
+         * v_demosaic_0's source pad once it's bound -- check the driver's
+         * dts_name table before picking the string, don't guess. */
+        xlnx,vid-formats = "rgbx8";
+
         xlnx,max-width = <1920>;
         xlnx,max-height = <1080>;
         xlnx,max-nr-planes = <1>;
     };
 
-    /*
-     * Xilinx Video IP Pipeline. This node builds the media graph and
-     * creates /dev/media0 and /dev/video0. Without it, csi2rxss registers
-     * only as an unbound async subdev and no device nodes appear.
-     */
     vcap_csi: vcap_csi {
         compatible = "xlnx,video";
         dmas = <&v_frmbuf_wr_0 0>;
@@ -206,21 +225,9 @@
                 reg = <0>;
                 direction = "input";
                 vcap_csi_in: endpoint {
-                    remote-endpoint = <&csi_out>;
+                    remote-endpoint = <&demosaic_out>;
                 };
             };
         };
     };
-
-    /*
-     * Legacy camcap path. Mutually exclusive with vcap_csi above -- both
-     * claim <&v_frmbuf_wr_0 0>. Uncomment this and comment out vcap_csi
-     * (and port@1 / csi_out in the CSI node) to fall back to camcap.ko.
-     *
-     * camcap: camcap {
-     *     compatible = "kv260,camcap";
-     *     dmas = <&v_frmbuf_wr_0 0>;
-     *     dma-names = "rx";
-     * };
-     */
 };
