@@ -143,7 +143,7 @@
 
         /* Both are pl_clk0 in design_1.tcl */
         clock-names = "lite_aclk", "video_aclk";
-        clocks = <&clocking0>, <&clocking0>;
+        clocks = <&zynqmp_clk 71>, <&zynqmp_clk 71>;
 
         ports {
             #address-cells = <1>;
