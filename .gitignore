@@ -1,0 +1,3 @@
+boot/kv260-cam.dtbo
+boot/kv260-cam.bit.bin
+hardware/*.bit.bin

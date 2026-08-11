@@ -1,0 +1,271 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * kv260-cam.dtso -- native V4L2 pipeline with hardware demosaic
+ *
+ * Chain: imx219 -> csi2rxss -> v_demosaic_0 -> vcap_csi -> v_frmbuf_wr_0
+ *
+ * STATUS: the 1920x1080 "Stream Line Buffer Full!" stall was a per-line
+ * BANDWIDTH DEFICIT, now fixed in hardware. pl_clk0 was 96.97 MHz actual
+ * (100 MHz requested); 1920 px/line at 1 px/clk needed 19.80 us against
+ * an imx219 line period of only 18.904 us, so the CSI2RX line buffer
+ * netted +87 px/line and overflowed ~94 lines into the first frame, every
+ * time. Resynthesised 2026-08-11 with PL0_REF_CTRL__FREQMHZ = 150;
+ * pl0_ref measures 142.857 MHz on the board, draining 1920 px in
+ * 13.44 us -- 41% margin. 1080p confirmed working, 30 frames.
+ *
+ * STILL OPEN: only the FIRST capture after an overlay load succeeds; the
+ * second SLBFs even at 640x480 where there is ~3x headroom. Independent
+ * of the clock and NOT fixed by this build -- the EMIO reset change
+ * (EMIO resets) was never made. Use software/reload.sh.
+ *
+ * reset-gpios on both v_demosaic_0 (gpio 80) and v_frmbuf_wr_0 (gpio 79)
+ * are functionally vestigial -- CONFIG.PSU__GPIO_EMIO_WIDTH is 1 and
+ * disabled in this design, so neither GPIO does anything electrically.
+ * Real reset comes from the shared PS peripheral_aresetn net. The
+ * property is present only because both drivers require gpiod_get() to
+ * succeed on something valid and unclaimed.
+ */
+
+&fpga_full {
+    firmware-name = "kv260-cam.bit.bin";
+    resets = <&zynqmp_reset 0x74>;
+};
+
+&amba {
+    #address-cells = <2>;
+    #size-cells = <2>;
+
+    /*
+     * pl_clk0 -- clocks the ENTIRE video datapath (csi2rx video_aclk,
+     * v_demosaic ap_clk, v_frmbuf_wr ap_clk) at 1 pixel/clock, plus the
+     * smartconnect and AXI IIC.
+     *
+     * 149998505 is the ACT_FREQMHZ from the XSA. The kernel does NOT
+     * deliver that -- the zynqmp clock driver rounds to the nearest the
+     * PLL can synthesise and pl0_ref lands at 142857142 (1 GHz VCO / 7).
+     * Measured on hardware 2026-08-11. That is fine: the floor is
+     * 101.57 MHz, so 1920 px drains in 13.44 us against an 18.904 us
+     * line period, 41% margin. Below the 150 MHz the design closed
+     * timing at, which is the safe direction.
+     *
+     * The request is not the result, twice over. Always verify:
+     *     sudo cat /sys/kernel/debug/clk/clk_summary | grep pl0
+     */
+    clocking0: clocking0 {
+        #clock-cells = <0>;
+        compatible = "xlnx,fclk";
+        clocks = <&zynqmp_clk 71>;
+        assigned-clocks = <&zynqmp_clk 71>;
+        assigned-clock-rates = <149998505>;
+        clock-output-names = "fabric_clk";
+    };
+
+    clocking1: clocking1 {
+        #clock-cells = <0>;
+        compatible = "xlnx,fclk";
+        clocks = <&zynqmp_clk 72>;
+        assigned-clocks = <&zynqmp_clk 72>;
+        assigned-clock-rates = <199999998>;
+        clock-output-names = "fabric_clk";
+    };
+
+    imx219_clk: imx219_clk {
+        #clock-cells = <0>;
+        compatible = "fixed-clock";
+        clock-frequency = <24000000>;
+    };
+
+    imx219_vana: imx219_vana {
+        compatible = "regulator-fixed";
+        regulator-name = "imx219_vana";
+        regulator-min-microvolt = <2800000>;
+        regulator-max-microvolt = <2800000>;
+    };
+
+    imx219_vdig: imx219_vdig {
+        compatible = "regulator-fixed";
+        regulator-name = "imx219_vdig";
+        regulator-min-microvolt = <1800000>;
+        regulator-max-microvolt = <1800000>;
+    };
+
+    imx219_vddl: imx219_vddl {
+        compatible = "regulator-fixed";
+        regulator-name = "imx219_vddl";
+        regulator-min-microvolt = <1200000>;
+        regulator-max-microvolt = <1200000>;
+    };
+
+    axi_iic_0: i2c@a0010000 {
+        compatible = "xlnx,axi-iic-2.1", "xlnx,xps-iic-2.00.a";
+        reg = <0x0 0xa0010000 0x0 0x10000>;
+        clocks = <&zynqmp_clk 71>;
+        clock-names = "s_axi_aclk";
+        interrupt-parent = <&gic>;
+        interrupts = <0 89 4>;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        i2c-mux@74 {
+            compatible = "nxp,pca9546";
+            reg = <0x74>;
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            i2c@0 { reg = <0>; #address-cells = <1>; #size-cells = <0>; };
+            i2c@1 { reg = <1>; #address-cells = <1>; #size-cells = <0>; };
+
+            i2c@2 {
+                reg = <2>;
+                #address-cells = <1>;
+                #size-cells = <0>;
+
+                imx219: sensor@10 {
+                    compatible = "sony,imx219";
+                    reg = <0x10>;
+                    clocks = <&imx219_clk>;
+                    clock-names = "xclk";
+                    VANA-supply = <&imx219_vana>;
+                    VDIG-supply = <&imx219_vdig>;
+                    VDDL-supply = <&imx219_vddl>;
+
+                    port {
+                        imx219_0: endpoint {
+                            remote-endpoint = <&csi_in>;
+                            data-lanes = <1 2>;
+                            clock-noncontinuous;
+                            link-frequencies = /bits/ 64 <456000000>;
+                        };
+                    };
+                };
+            };
+
+            i2c@3 { reg = <3>; #address-cells = <1>; #size-cells = <0>; };
+        };
+    };
+
+    mipi_csi2_rx_subsyst_0: mipi_csi2_rx_subsystem@a0020000 {
+        compatible = "xlnx,mipi-csi2-rx-subsystem-5.0";
+        reg = <0x0 0xa0020000 0x0 0x2000>;
+
+        interrupt-parent = <&gic>;
+        interrupts = <0 90 4>;
+
+        xlnx,csi-pxl-format = <0x2b>;   /* RAW10 -- confirmed set in Vivado IP GUI */
+        xlnx,vfb;
+
+        clock-names = "lite_aclk", "video_aclk";
+        clocks = <&zynqmp_clk 71>, <&zynqmp_clk 71>;
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                csi_in: endpoint {
+                    remote-endpoint = <&imx219_0>;
+                    data-lanes = <1 2>;
+                };
+            };
+
+            port@1 {
+                reg = <1>;
+                csi_out: endpoint {
+                    remote-endpoint = <&demosaic_in>;
+                };
+            };
+        };
+    };
+
+    v_demosaic_0: v_demosaic@a0030000 {
+        compatible = "xlnx,v-demosaic";
+        reg = <0x0 0xa0030000 0x0 0x10000>;   /* confirmed via get_bd_addr_segs */
+        reset-gpios = <&gpio 80 1>;
+
+        clocks = <&zynqmp_clk 71>;
+        clock-names = "ap_clk";
+
+        xlnx,max-width = <1920>;
+        xlnx,max-height = <1080>;
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                xlnx,video-width = <10>;
+                demosaic_in: endpoint {
+                    remote-endpoint = <&csi_out>;
+                };
+            };
+
+            port@1 {
+                reg = <1>;
+                xlnx,video-width = <10>;
+                demosaic_out: endpoint {
+                    remote-endpoint = <&vcap_csi_in>;
+                };
+            };
+        };
+    };
+
+    v_frmbuf_wr_0: v_frmbuf_wr@a0000000 {
+        compatible = "xlnx,v-frmbuf-wr-3.1", "xlnx,v-frmbuf-wr-v3.0", "xlnx,axi-frmbuf-wr-v2.2";
+        reg = <0x0 0xa0000000 0x0 0x10000>;
+        #dma-cells = <1>;
+        interrupt-parent = <&gic>;
+        interrupt-names = "interrupt";
+        interrupts = <0 104 4>;
+        clocks = <&zynqmp_clk 71>;
+        clock-names = "ap_clk";
+        reset-gpios = <&gpio 79 1>;
+        xlnx,dma-addr-width = <32>;
+        xlnx,dma-align = <8>;
+        xlnx,pixels-per-clock = <1>;
+
+        /* Confirmed against real xilinx_frmbuf_formats[] table:
+         * dts_name "rgb888" -> XILINX_FRMBUF_FMT_BGR8 -> V4L2_PIX_FMT_BGR24
+         * -> fourcc BGR3. Requires BGR8 ticked in the IP's own Video
+         * Formats GUI (was unticked -- only Y10 was -- until fixed). */
+        xlnx,vid-formats = "rgb888";
+
+        xlnx,max-width = <1920>;
+        xlnx,max-height = <1080>;
+        xlnx,max-nr-planes = <1>;
+    };
+
+    vcap_csi: vcap_csi {
+        compatible = "xlnx,video";
+        dmas = <&v_frmbuf_wr_0 0>;
+        dma-names = "port0";
+
+        ports {
+            #address-cells = <1>;
+            #size-cells = <0>;
+
+            port@0 {
+                reg = <0>;
+                direction = "input";
+                vcap_csi_in: endpoint {
+                    remote-endpoint = <&demosaic_out>;
+                };
+            };
+        };
+    };
+
+    /*
+     * Legacy camcap path. Kept as a fallback -- swap this in and remove
+     * v_demosaic_0/vcap_csi's link to fall back to the dmaengine-direct
+     * capture that was proven working before tonight's native V4L2 work.
+     *
+     * camcap: camcap {
+     *     compatible = "kv260,camcap";
+     *     dmas = <&v_frmbuf_wr_0 0>;
+     *     dma-names = "rx";
+     * };
+     */
+};
