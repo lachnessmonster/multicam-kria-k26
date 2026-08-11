@@ -147,10 +147,10 @@
         };
     };
 
-    v_demosaic_0: v_demosaic@a0030000 {
+v_demosaic_0: v_demosaic@a0030000 {
         compatible = "xlnx,v-demosaic";
         reg = <0x0 0xa0030000 0x0 0x10000>;
-
+        reset-gpios = <&gpio 79 1>;
         clocks = <&zynqmp_clk 71>;
         clock-names = "ap_clk";
 
