@@ -45,68 +45,6 @@ is the reset and not a frmbuf `AP_START` problem: on a wedged run the SLBF
 timestamp lands at the *end* of the 10 s timeout, not the start, so the
 CSI2RX was accepting data with nothing draining it.
 
-## The clock — read this before touching pl_clk0
-
-The IMX219 line period is **18.904 µs in every mode** (`IMX219_PPL_DEFAULT
-= 3448` / `IMX219_PIXEL_RATE = 182400000`; PPL is fixed, HBLANK is
-read-only). Draining 1920 active px at 1 px/clk must fit inside it.
-
-**Floor: 101.57 MHz.** Below that the CSI2RX line buffer gains pixels every
-line, hits `CSI_BUF_DEPTH = 8192` about 94 lines into the first frame, and
-SLBFs. Lowering the frame rate does not help — VBLANK changes the frame
-period, not the line period.
-
-| | requested | actual | 1920 px drain | margin |
-|---|---|---|---|---|
-| old, broken | 100 | 96.97 | 19.80 µs | **−4.7%** |
-| now | 150 | **142.857** | 13.44 µs | +41% |
-
-Two roundings, both surprising. Vivado's RPLL gave 149.998505 for a 150
-request; the kernel then rounds *again* to 142857142 (1 GHz VCO / 7). The
-`.dtso` asks for the Vivado figure and the board delivers the third one.
-Never trust the request — verify:
-
-```bash
-sudo cat /sys/kernel/debug/clk/clk_summary | grep pl0
-```
-
-**If SLBF returns, check this first.** The arithmetic is settled; it is not
-a pipeline config bug.
-
-## Gotchas that cost real time
-
-- **Never hand-copy a `.dtbo`.** A stale committed blob once silently
-  reverted the board to a no-demosaic Y10 pipeline. Always `make dtbo`.
-  (dtc version changes the byte size slightly without changing content.)
-- **`field:none` on every `media-ctl -V`** or the link validator returns
-  -EPIPE. `media-ctl -p` doesn't print `field:` on most pads, so it's
-  invisible.
-- **Capture format is BGR3** — `V4L2_PIX_FMT_BGR24`, blue first.
-  `view.py` reverses it. Feeding it to PIL as RGB looks like a broken
-  demosaic.
-- **The demosaic source pad (pad 1) must be set**, to `RBG888_1X24`. The
-  driver silently rewrites anything else.
-- **`xlnx,video-width` on the demosaic ports does nothing.** `xdmsc_parse_of()`
-  reads only `xlnx,max-height`, `xlnx,max-width` and the reset GPIO.
-- **`reset-gpios` is mandatory** on demosaic and frmbuf — `devm_gpiod_get`,
-  non-optional, probe fails without it. Even though it's vestigial here.
-- **`make deploy` needs `ssh -t`** for remote sudo, and will prompt for the
-  password twice. `ssh-copy-id` once if you're iterating.
-
-## Rebuilding the bitstream
-
-`hardware/design_1.tcl` is the source of truth and does reproduce the XSA
-(`CMN_PXL_FORMAT {RAW10}` and `HAS_BGR8 {1}` are both in it — RAW10 was
-missing once and cost a synthesis cycle). After any rebuild:
-
-1. Check timing. `puts [get_property STATS.WNS [get_runs impl_1]]` ≥ 0.
-2. Re-read `ACT_FREQMHZ` from the new XSA, update `assigned-clock-rates`.
-3. Verify on the board with `clk_summary`. That number is the authority.
-
-If timing won't close, `SAMPLES_PER_CLOCK = 2` on demosaic and frmbuf
-halves the required clock, but changes AXIS TDATA widths and needs
-`xlnx,pixels-per-clock = <2>` in the frmbuf node. Plan B.
-
 ## Known, not chased
 
 ~12 fps at 1080p. The clock allows ~68 fps theoretical, so the shortfall is
