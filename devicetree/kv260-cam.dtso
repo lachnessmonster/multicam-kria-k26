@@ -183,6 +183,7 @@
         xlnx,dma-addr-width = <32>;
         xlnx,dma-align = <8>;
         xlnx,pixels-per-clock = <1>;
+        xlnx,vid-formats = "rgb888";
 
         xlnx,max-width = <1920>;
         xlnx,max-height = <1080>;

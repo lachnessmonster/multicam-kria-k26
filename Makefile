@@ -22,13 +22,13 @@ stage: boot/kv260-cam.bit.bin boot/kv260-cam.dtbo boot/shell.json
 	@ls -l boot/
 
 deploy: stage
-	scp boot/kv260-cam.bit.bin boot/kv260-cam.dtbo boot/shell.json $(BOARD):~
+	scp boot/kv260-cam.bit.bin boot/kv260-cam.dtbo boot/shell.json $(BOARD):~/newdev
 	ssh -t $(BOARD) 'sudo mkdir -p /lib/firmware/xilinx/kv260-cam && \
-	  sudo cp ~/kv260-cam.bit.bin ~/kv260-cam.dtbo ~/shell.json /lib/firmware/xilinx/kv260-cam/ && \
+	  sudo cp ~/newdev/kv260-cam.bit.bin ~/newdev/kv260-cam.dtbo ~/newdev/shell.json /lib/firmware/xilinx/kv260-cam/ && \
 	  sudo xmutil unloadapp; sudo xmutil loadapp kv260-cam && sleep 2 && \
 	  sudo cat /sys/kernel/debug/clk/clk_summary | grep pl0'
-	scp -r software $(BOARD):~/
-	ssh -t $(BOARD) 'chmod +x ~/software/*.sh ~/software/view.py'
+	scp -r software $(BOARD):~/newdev
+	ssh -t $(BOARD) 'chmod +x ~/newdev/software/*.sh ~/newdev/software/view.py'
 
 clean:
 	rm -f boot/kv260-cam.dtbo boot/kv260-cam.bit.bin
