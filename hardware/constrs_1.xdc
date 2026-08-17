@@ -1,1 +1,0 @@
-set_property -dict {PACKAGE_PIN F11 IOSTANDARD LVCMOS33} [get_ports rpi_cam_en]

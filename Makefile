@@ -7,7 +7,7 @@ DTC   ?= dtc
 IMPL  ?= $(CURDIR)/hardware
 BOARD ?= unimelb-research@192.168.2.1
 
-.PHONY: dtbo stage deploy clean
+.PHONY: dtbo stage deploy deploy-kmod clean
 dtbo: boot/kv260-cam.dtbo
 
 boot/%.dtbo: devicetree/%.dtso
@@ -30,5 +30,13 @@ deploy: stage
 	scp -r software $(BOARD):~/newdev
 	ssh -t $(BOARD) 'chmod +x ~/newdev/software/*.sh ~/newdev/software/view.py'
 
+# The sensor driver is out of tree and must be built ON the board against
+# its own headers -- there is no imx519.c in mainline or linux-xlnx.
+# The board has no working DNS, so imx519.c is vendored rather than fetched.
+deploy-kmod:
+	scp -r kmod setup-imx519.sh $(BOARD):~/
+	ssh -t $(BOARD) 'cd ~/kmod && make && sudo make install && sudo depmod -a && sudo modprobe imx519'
+
 clean:
 	rm -f boot/kv260-cam.dtbo boot/kv260-cam.bit.bin
+	$(MAKE) -C kmod clean 2>/dev/null || true

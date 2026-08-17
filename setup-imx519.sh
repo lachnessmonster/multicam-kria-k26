@@ -1,38 +1,39 @@
+#!/bin/bash
+# One-shot IMX519 bring-up on the KV260. Run on the board:
+#   chmod +x setup-imx519.sh && ./setup-imx519.sh
+#
+# Writes the overlay, compiles it, installs it, reloads the app and
+# verifies the sensor probed. Does NOT capture -- run reload.sh after.
+set -euo pipefail
+
+APP=kv260-cam
+FW=/lib/firmware/xilinx/$APP
+WORK=~/imx519-setup
+mkdir -p "$WORK" && cd "$WORK"
+
+echo "== 0. preflight =="
+if ! command -v dtc >/dev/null; then
+    echo "!! dtc not installed and the board has no DNS." >&2
+    echo "   sudo apt install device-tree-compiler   (needs network), or" >&2
+    echo "   build the .dtbo on your laptop and scp it to $FW/" >&2
+    exit 1
+fi
+[ -d "$FW" ] || { echo "!! $FW missing -- was the IMX219 app ever installed?" >&2; exit 1; }
+if ! lsmod | grep -q '^imx519'; then
+    echo "-- loading imx519 module"
+    sudo modprobe imx519 || { echo "!! imx519.ko not installed; run 'sudo make install' in ~/imx519" >&2; exit 1; }
+fi
+
+echo "== 1. writing overlay =="
+cat > $APP.dtso <<'DTSO'
 /dts-v1/;
 /plugin/;
-
-/*
- * KV260 RPi-cam pipeline, IMX519 variant.
- *
- * Deltas from the IMX219 version (all confirmed against
- * raspberrypi/linux rpi-6.6.y imx519.c + overlays/imx519.dtsi):
- *
- *   sensor I2C addr        0x10  -> 0x1a
- *   compatible             sony,imx219 -> sony,imx519
- *   link-frequencies       456000000 -> 493500000   (987 Mbps/lane)
- *                          -- value is driver-branch specific, see below
- *   VDIG rail              1.8V -> 1.05V per the driver's own comment
- *                          (cosmetic; these are fixed dummy regulators)
- *   optional ak7375 VCM    added at 0x0c, status disabled by default
- *
- * Unchanged and deliberately so:
- *   xlnx,csi-pxl-format = 0x2b   IMX519 is RAW10 in every mode
- *   data-lanes = <1 2>           the RPi driver rejects anything but 2
- *   xclk 24 MHz                  IMX519_XCLK_FREQ, same as IMX219
- *   xlnx,max-width/height        baked into the bitstream at 1920x1080
- *
- * NOTE the D-PHY in this bitstream is synthesised for C_HS_LINE_RATE=912
- * (the IMX219's 456 MHz x2). On 5.15 the IMX519 runs 987, i.e. ABOVE the
- * configured rate rather than below it. T_HS_SETTLE is not the worry --
- * the receive windows overlap almost completely (91.1-155.1 ns at 987 vs
- * 91.6-156.0 ns at 912) -- but running a soft D-PHY 8% faster than the
- * rate it was configured and timed for is a genuine watch item, unlike
- * the 816 case on 6.6. If you see ECC/CRC errors from the CSI2RX rather
- * than the SLBF stall, this is the first suspect. DPY_EN_REG_IF is true
- * in this design, so HS_SETTLE is writable at runtime in the D-PHY
- * register bank. See PORTING-IMX519.md.
+/* KV260 IMX519 pipeline. Annotated version in devicetree/kv260-cam.dtso.
+ * link-frequencies 493500000 MUST match rpi-5.15.y IMX519_DEFAULT_LINK_FREQ.
+ * assigned-clock-rates 142857142 is 999999990/7, the only reachable rate
+ * near 150 MHz on this PLL. max-width/height 1920x1080 are baked into the
+ * bitstream: only 1920x1080 and 1280x720 are reachable.
  */
-
 &fpga_full {
     firmware-name = "kv260-cam.bit.bin";
     resets = <&zynqmp_reset 0x74>;
@@ -47,21 +48,7 @@
         compatible = "xlnx,fclk";
         clocks = <&zynqmp_clk 71>;
         assigned-clocks = <&zynqmp_clk 71>;
-        /*
-         * 142857142 = 999999990 / 7, and that is not a typo or a stale
-         * value -- it is the only thing this clock tree can produce near
-         * 150 MHz. pl0 is fed from RPLL at 999999990 through integer
-         * dividers, so the reachable rates are 125.000 (/8), 142.857 (/7),
-         * 166.667 (/6), 200.000 (/5). Asking for 150 gets silently
-         * rounded back to 142.857; verified on hardware via clk_summary.
-         *
-         * The "pl_clk0 is now 149.998505 MHz" claim in the old capture.sh
-         * is therefore wrong, and the block design's
-         * PSU__CRL_APB__PL0_REF_CTRL__FREQMHZ {150} is a request the PS
-         * cannot honour. Do not "fix" this number upward expecting an
-         * effect; the only real step up is /6 = 166.667 MHz, which is an
-         * 11% overclock on a design closed at 150.
-         */
+        
         assigned-clock-rates = <142857142>;
         clock-output-names = "fabric_clk";
     };
@@ -135,12 +122,7 @@
                     VDIG-supply = <&imx519_vdig>;
                     VDDL-supply = <&imx519_vddl>;
 
-                    /*
-                     * Leave these at 0. The RPi driver derives its
-                     * Bayer code from HFLIP/VFLIP, and the demosaic
-                     * sink pad in capture.sh is hardcoded SRGGB10.
-                     * Flip the sensor and you must flip that too.
-                     */
+                    
                     rotation = <0>;
                     orientation = <2>;
 
@@ -149,29 +131,13 @@
                             remote-endpoint = <&csi_in>;
                             data-lanes = <1 2>;
                             clock-noncontinuous;
-                            /*
-                             * MUST equal the driver's own
-                             * IMX519_DEFAULT_LINK_FREQ or probe fails with
-                             * "Link frequency not supported". That constant
-                             * is NOT stable across branches:
-                             *   rpi-5.15.y -> 493500000  (987 Mbps/lane)
-                             *   rpi-6.6.y  -> 408000000  (816 Mbps/lane)
-                             * This board runs 5.15, hence 493.5 MHz. If you
-                             * ever move the driver to a 6.6 kernel, change
-                             * this line at the same time.
-                             */
+                            
                             link-frequencies = /bits/ 64 <493500000>;
                         };
                     };
                 };
 
-                /*
-                 * Arducam 16MP autofocus modules carry an AK7375 VCM.
-                 * The upstream-style imx519.c has no focus control of
-                 * its own; focus comes from this separate subdev via
-                 * lens-focus. Enable only if you need AF and have
-                 * CONFIG_VIDEO_AK7375. Harmless when absent.
-                 */
+                
                 imx519_vcm: ak7375@c {
                     compatible = "asahi-kasei,ak7375";
                     reg = <0x0c>;
@@ -190,7 +156,7 @@
         interrupt-parent = <&gic>;
         interrupts = <0 90 4>;
 
-        xlnx,csi-pxl-format = <0x2b>;   /* RAW10 -- IMX519 is RAW10 in all modes */
+        xlnx,csi-pxl-format = <0x2b>;   
         xlnx,vfb;
 
         clock-names = "lite_aclk", "video_aclk";
@@ -225,12 +191,7 @@
         clocks = <&zynqmp_clk 71>;
         clock-names = "ap_clk";
 
-        /*
-         * Hard ceiling from the bitstream: v_demosaic and v_frmbuf_wr
-         * are both synthesised MAX_COLS=1920 MAX_ROWS=1080. That rules
-         * out the IMX519's 4656x3496, 3840x2160 and 2328x1748 modes.
-         * Only 1920x1080 and 1280x720 are reachable without a rebuild.
-         */
+        
         xlnx,max-width = <1920>;
         xlnx,max-height = <1080>;
 
@@ -295,3 +256,43 @@
         };
     };
 };
+DTSO
+
+echo "== 2. compiling =="
+dtc -@ -I dts -O dtb -o $APP.dtbo $APP.dtso 2>&1 | grep -v graph_child_address || true
+[ -s $APP.dtbo ] || { echo "!! dtc produced nothing" >&2; exit 1; }
+
+echo "== 3. installing =="
+sudo cp -v $APP.dtbo "$FW/$APP.dtbo"
+
+echo "== 4. reloading app =="
+sudo xmutil unloadapp || true
+sudo xmutil loadapp $APP
+sleep 2
+
+echo "== 5. verify =="
+echo "-- pl0 clock (want ~150 MHz; below 135.9 rules out 1080p) --"
+grep pl0 /sys/kernel/debug/clk/clk_summary 2>/dev/null | sudo tee /dev/null || \
+  sudo grep pl0 /sys/kernel/debug/clk/clk_summary || echo "   (clk_summary unreadable)"
+
+echo "-- imx519 probe --"
+dmesg | grep -i imx519 | tail -10 || true
+
+SENSOR=$(media-ctl -d /dev/media0 -p 2>/dev/null | grep -oE 'imx519 [0-9]+-[0-9a-f]+' | head -1 || true)
+if [ -z "$SENSOR" ]; then
+    echo
+    echo "!! no imx519 entity in /dev/media0. Most likely causes, in order:"
+    echo "   1. link-frequency mismatch -- dmesg says 'Link frequency not supported'."
+    echo "      The DT says 493500000; the driver must agree. Check with:"
+    echo "        grep DEFAULT_LINK_FREQ ~/imx519/imx519.c"
+    echo "   2. module not loaded:   lsmod | grep imx519"
+    echo "   3. sensor not on the bus: sudo i2cdetect -y -r 6   (want 1a)"
+    exit 1
+fi
+
+echo
+echo "OK: $SENSOR"
+media-ctl -d /dev/media0 -p | grep -E '^- entity|imx519|demosaic|csi2|frmbuf' || true
+echo
+echo "Next:  cd ~/newdev/software && ./reload.sh 1280x720 /tmp/shot.raw 1"
+echo "       python3 view.py /tmp/shot.raw /tmp/shot.png 1280x720"
