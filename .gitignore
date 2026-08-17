@@ -1,1 +1,13 @@
-
+boot/*.bit.bin
+boot/*.dtbo
+boot/*.bit.bin
+boot/*.dtbo
+hardware/*.bit.bin
+hardware/bit.bif
+boot/*.bit.bin
+boot/*.dtbo
+hardware/*.bit.bin
+hardware/bit.bif
+boot/*.bit.bin
+boot/*.dtbo
+hardware/bit.bif
