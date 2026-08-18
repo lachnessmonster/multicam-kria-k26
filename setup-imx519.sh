@@ -2,8 +2,12 @@
 # One-shot IMX519 bring-up on the KV260. Run on the board:
 #   chmod +x setup-imx519.sh && ./setup-imx519.sh
 #
+# MANUAL FOCUS M12 module (Arducam B0449 class). No AK7375 VCM, so no
+# ak7375 node in the overlay below and nothing at 0x0c on the bus.
+#
 # Writes the overlay, compiles it, installs it, reloads the app and
-# verifies the sensor probed. Does NOT capture -- run reload.sh after.
+# verifies the sensor probed. Does NOT capture -- run reload.sh after,
+# and focus.sh once, by hand, before you trust any image.
 set -euo pipefail
 
 APP=kv260-cam
@@ -28,11 +32,14 @@ echo "== 1. writing overlay =="
 cat > $APP.dtso <<'DTSO'
 /dts-v1/;
 /plugin/;
-/* KV260 IMX519 pipeline. Annotated version in devicetree/kv260-cam.dtso.
+/* KV260 IMX519 pipeline, MANUAL FOCUS M12 module. Annotated version in
+ * devicetree/kv260-cam.dtso.
  * link-frequencies 493500000 MUST match rpi-5.15.y IMX519_DEFAULT_LINK_FREQ.
  * assigned-clock-rates 142857142 is 999999990/7, the only reachable rate
  * near 150 MHz on this PLL. max-width/height 1920x1080 are baked into the
- * bitstream: only 1920x1080 and 1280x720 are reachable.
+ * bitstream: only 1920x1080 and 1280x720 are reachable, and both are
+ * analogue CROPS of the array -- 82.5% and 55.0% of full width, so mode
+ * choice costs field of view. No ak7375 node: this module has no VCM.
  */
 &fpga_full {
     firmware-name = "kv260-cam.bit.bin";
@@ -137,12 +144,7 @@ cat > $APP.dtso <<'DTSO'
                     };
                 };
 
-                
-                imx519_vcm: ak7375@c {
-                    compatible = "asahi-kasei,ak7375";
-                    reg = <0x0c>;
-                    status = "disabled";
-                };
+                /* no ak7375@c: manual focus module has no VCM */
             };
 
             i2c@3 { reg = <3>; #address-cells = <1>; #size-cells = <0>; };
@@ -287,6 +289,9 @@ if [ -z "$SENSOR" ]; then
     echo "        grep DEFAULT_LINK_FREQ ~/imx519/imx519.c"
     echo "   2. module not loaded:   lsmod | grep imx519"
     echo "   3. sensor not on the bus: sudo i2cdetect -y -r 6   (want 1a)"
+    echo "      0x0c answering means you have an AUTOFOCUS module, not the"
+    echo "      manual one this tree targets. It will still stream, but it"
+    echo "      will be parked at its power-on focus and look soft."
     exit 1
 fi
 
@@ -294,5 +299,17 @@ echo
 echo "OK: $SENSOR"
 media-ctl -d /dev/media0 -p | grep -E '^- entity|imx519|demosaic|csi2|frmbuf' || true
 echo
-echo "Next:  cd ~/newdev/software && ./reload.sh 1280x720 /tmp/shot.raw 1"
-echo "       python3 view.py /tmp/shot.raw /tmp/shot.png 1280x720"
+echo "-- i2c bus (manual module: expect 1a, and NOTHING at 0c) --"
+BUS=$(echo "$SENSOR" | sed -E 's/imx519 ([0-9]+)-.*/\1/')
+sudo i2cdetect -y -r "$BUS" 2>/dev/null || echo "   (i2cdetect unavailable)"
+
+echo
+echo "Next:  cd ~/newdev/software && ./reload.sh 1920x1080 /tmp/shot.raw 1"
+echo "       python3 view.py /tmp/shot.raw /tmp/shot.png 1920x1080"
+echo
+echo "Then FOCUS IT. The lens is manual and ships at an arbitrary position:"
+echo "       ./focus.sh 1920x1080"
+echo "  Turn the lens barrel between iterations, watch the score peak, stop,"
+echo "  lock the retaining ring. Once set it is set -- both reachable modes"
+echo "  are 2x2 binned, so hyperfocal is under a metre and depth of field"
+echo "  runs from roughly 0.5 m to infinity." 

@@ -28,11 +28,15 @@ deploy: stage
 	  sudo xmutil unloadapp; sudo xmutil loadapp kv260-cam && sleep 2 && \
 	  sudo cat /sys/kernel/debug/clk/clk_summary | grep pl0'
 	scp -r software $(BOARD):~/newdev
-	ssh -t $(BOARD) 'chmod +x ~/newdev/software/*.sh ~/newdev/software/view.py'
+	ssh -t $(BOARD) 'chmod +x ~/newdev/software/*.sh ~/newdev/software/*.py'
 
 # The sensor driver is out of tree and must be built ON the board against
 # its own headers -- there is no imx519.c in mainline or linux-xlnx.
 # The board has no working DNS, so imx519.c is vendored rather than fetched.
+#
+# The driver is identical for the manual-focus and autofocus modules: the
+# difference between them is the lens assembly and the AK7375 VCM, neither
+# of which imx519.c knows about. Nothing to select here.
 deploy-kmod:
 	scp -r kmod setup-imx519.sh $(BOARD):~/
 	ssh -t $(BOARD) 'cd ~/kmod && make && sudo make install && sudo depmod -a && sudo modprobe imx519'

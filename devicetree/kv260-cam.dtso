@@ -13,7 +13,19 @@
  *                          -- value is driver-branch specific, see below
  *   VDIG rail              1.8V -> 1.05V per the driver's own comment
  *                          (cosmetic; these are fixed dummy regulators)
- *   optional ak7375 VCM    added at 0x0c, status disabled by default
+ *
+ * MODULE VARIANT: this tree targets the MANUAL FOCUS M12 module
+ * (Arducam B0449 class -- "16MP IMX519 with 122/140 deg (D) wide angle
+ * M12 lens"), NOT the B0371 autofocus module. There is no AK7375 VCM on
+ * this board, so the ak7375@c node that earlier revisions carried has
+ * been REMOVED rather than merely disabled. Arducam's own Raspberry Pi
+ * instructions for this SKU say to boot it as `dtoverlay=imx519,vcm=off`,
+ * which is the same statement in RPi form.
+ *
+ * The sensor side is otherwise byte-identical to the AF module: same
+ * die, same 0x1a address, same driver, same register set. Manual vs
+ * autofocus is a lens-assembly difference only. If you put an AF module
+ * on this board the tree still works -- you just get no focus control.
  *
  * Unchanged and deliberately so:
  *   xlnx,csi-pxl-format = 0x2b   IMX519 is RAW10 in every mode
@@ -166,17 +178,24 @@
                 };
 
                 /*
-                 * Arducam 16MP autofocus modules carry an AK7375 VCM.
-                 * The upstream-style imx519.c has no focus control of
-                 * its own; focus comes from this separate subdev via
-                 * lens-focus. Enable only if you need AF and have
-                 * CONFIG_VIDEO_AK7375. Harmless when absent.
+                 * NO VCM NODE HERE, DELIBERATELY.
+                 *
+                 * The autofocus IMX519 modules carry an AK7375 VCM at
+                 * 0x0c and need a separate ak7375 subdev plus a
+                 * `lens-focus` phandle, because imx519.c has no focus
+                 * control of its own (grep it: zero hits for vcm, focus
+                 * or lens). The manual-focus M12 module has no VCM at
+                 * all -- focus is the lens barrel thread, set by hand.
+                 *
+                 * `i2cdetect -y -r <bus>` on mux leg 2 should show 0x1a
+                 * and NOTHING at 0x0c. If 0x0c answers, you have an
+                 * autofocus module, and you want the AF branch of this
+                 * tree instead -- the image will otherwise sit at
+                 * whatever focus position the VCM powers up to, which
+                 * is usually near-field and looks like a soft pipeline.
+                 * 0x50, if present, is the module ID EEPROM; nothing
+                 * here reads it.
                  */
-                imx519_vcm: ak7375@c {
-                    compatible = "asahi-kasei,ak7375";
-                    reg = <0x0c>;
-                    status = "disabled";
-                };
             };
 
             i2c@3 { reg = <3>; #address-cells = <1>; #size-cells = <0>; };
@@ -230,6 +249,17 @@
          * are both synthesised MAX_COLS=1920 MAX_ROWS=1080. That rules
          * out the IMX519's 4656x3496, 3840x2160 and 2328x1748 modes.
          * Only 1920x1080 and 1280x720 are reachable without a rebuild.
+         *
+         * WITH A WIDE-ANGLE LENS THIS COSTS FIELD OF VIEW, NOT JUST
+         * PIXELS. The driver's mode table takes each mode from a
+         * different ANALOGUE CROP of the array:
+         *   1920x1080 <- 3840x2160 crop, 2x2 binned  (82.5% of width)
+         *   1280x720  <- 2560x1440 crop, 2x2 binned  (55.0% of width)
+         * so 720p is a ~1.5x tele crop relative to 1080p and throws
+         * away most of what the M12 wide lens was bought for.
+         * 2328x1748 is the only sub-4656 mode cropped from the FULL
+         * array, which makes it the right rebuild target here. See the
+         * Field of view section in README.md.
          */
         xlnx,max-width = <1920>;
         xlnx,max-height = <1080>;

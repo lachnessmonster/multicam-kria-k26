@@ -1,16 +1,34 @@
 # Porting kv260-cam from IMX219 to IMX519
 
-Three things stand between you and a frame. In order of how much of your
-week they will take:
+Targets the **manual focus M12 wide-angle** module (Arducam B0449 class),
+not the B0371 autofocus one. Sections 1-3 are identical for both — the
+sensor, driver and bandwidth do not care which lens is glued on the
+front. Section 4 is the part that only applies here.
+
+Four things stand between you and a *good* frame. In order of how much of
+your week they will take:
 
 1. **There is no IMX519 driver in your kernel.** Not in mainline, not in
    Xilinx's tree. This is the whole job.
 2. 1080p per-line drain margin falls from +32% to +9%.
 3. The D-PHY is synthesised for the wrong line rate. Probably benign;
    here's the arithmetic for why.
+4. **The lens.** Nothing to do with the port, cheap to fix, and capable
+   of eating an afternoon if you don't know to look: the modes crop the
+   wide field away, and focus is a thing you do with your fingers.
 
 Everything else is a device-tree edit, and it's already done in
 `devicetree/kv260-cam.dtso`.
+
+> **Note on numbers below.** Sections 2 and 3 were written during the
+> port, using an assumed pl_clk0 of 149.998505 MHz and a 426.667 MHz
+> pixel rate. Both turned out to be wrong: the PLL can only reach
+> 142.857142 MHz, and the rpi-5.15.y driver's PIXEL_RATE is 686 MHz. The
+> conclusions survive — 1080p is tight, 720p is safe — but the margins
+> are worse than the tables here say (+4.8% and +11.8%, not +9.4% and
+> +40.7%). **README.md has the corrected arithmetic; trust it over this
+> file.** The reasoning is kept as written because the method is the
+> useful part.
 
 ---
 
@@ -72,8 +90,15 @@ alive before blaming software:
 
 ```bash
 i2cdetect -l                  # find the adapter behind the PCA9546 leg
-i2cdetect -y -r <bus>         # expect 0x1a, and 0x0c if it's an AF module
+i2cdetect -y -r <bus>         # manual module: expect 0x1a and NOTHING else
 ```
+
+On the manual focus module 0x1a should be the only address that answers.
+**If 0x0c answers, you have an autofocus module**, that is an AK7375 VCM,
+and this tree is missing the `ak7375` node it needs — it will still
+stream, but focus will sit whereever the VCM powers up, usually near
+field, and the result looks exactly like a soft pipeline. 0x50, if
+present, is the module ID EEPROM; nothing here reads it.
 
 Chip ID is `0x0519` at register `0x0016`.
 
@@ -140,8 +165,12 @@ design timed at 150.
 Which is worth saying plainly: **the main reason to want an IMX519 is its
 16 MP array, and this bitstream cannot carry it.** If full resolution is
 the point of the exercise, the FPGA rebuild is the project, not the
-device-tree edit. If you're after the IMX519 for autofocus or low light,
-you're fine.
+device-tree edit.
+
+And on a wide-angle module it costs field of view too, not just pixels —
+the modes are analogue crops, so 720p sees only 50-63% of the diagonal
+field the full array does, depending on the lens projection. See
+section 4.
 
 ---
 
@@ -171,6 +200,62 @@ offset of `HS_SETTLE` in your IP version before poking it with `devmem`.
 Note that the Xilinx `xilinx-csi2rxss.c` driver does **not** program
 `HS_SETTLE` — there's no `link_freq` handling in it at all — so nothing
 will do this for you automatically.
+
+---
+
+---
+
+## 4. The lens, which is the part specific to this module
+
+Nothing here is a porting problem. It is all cheap to deal with once
+known and expensive to diagnose from symptoms, which is the worst
+combination, so it goes in the porting doc.
+
+### Delete the VCM node
+
+Earlier revisions of the overlay carried an `ak7375@c` node with
+`status = "disabled"`, on the theory that it was harmless when absent.
+It is now deleted outright. The manual module has no VCM, `imx519.c` has
+no focus control of its own (grep: zero hits for `vcm`, `focus`, `lens`),
+and a disabled node for hardware that does not exist is just a thing for
+the next person to wonder about. Arducam's own RPi guidance for this SKU
+is `dtoverlay=imx519,vcm=off`, which says the same.
+
+### The modes crop the field away
+
+Each IMX519 mode reads a **different analogue crop of the array**, not a
+scaled version of one picture. From `supported_modes_10bit`:
+
+| mode | analogue crop | binning | % of array width |
+|---|---|---|---|
+| 4656x3496 | 4656x3496 | 1x1 | 100.0% |
+| 3840x2160 | 3840x2160 | 1x1 | 82.5% |
+| 2328x1748 | **4656x3496** | 2x2 | **100.0%** |
+| 1920x1080 | 3840x2160 | 2x2 | 82.5% |
+| 1280x720 | 2560x1440 | 2x2 | 55.0% |
+
+**720p is a ~1.5x tele crop of 1080p.** Both fill the frame and look
+correct, so this is invisible unless you go looking. The bring-up advice
+in section 2 — start at 720p — is still right for proving the pipeline,
+but do not evaluate the lens there and do not ship there.
+
+This also sharpens the rebuild target. 2328x1748 is the only mode below
+4656 wide that comes from the *full* array, so it is the only way to get
+the whole field without paying 16 MP of bandwidth for it.
+
+### Focus is mechanical, and its absence looks like a bug
+
+No VCM, no software focus, no preview (the SLBF bug means only the first
+capture after an overlay load works). The barrel arrives at an arbitrary
+position. A soft first image is overwhelmingly likely to be that, and not
+the D-PHY, the link frequency or the demosaic — check it first, because
+it is thirty seconds of turning versus a day in `dmesg`.
+
+`software/focus.sh` is the step-and-score loop; `focus.py` explains what
+it measures and where the metric fails. Do this once: both reachable
+modes are 2x2 binned, so hyperfocal is under a metre and depth of field
+runs from roughly 0.4 m to infinity. Set it, lock the ring, move on. If
+you later rebuild for full res, refocus — unbinned, hyperfocal doubles.
 
 ---
 
@@ -210,14 +295,23 @@ datasheet.
 
 ## Order of operations
 
-1. `i2cdetect` — is 0x1a there at all?
+1. `i2cdetect` — is 0x1a there, and is 0x0c absent as it should be?
 2. Build the driver, Option A. `dmesg | grep imx519` for chip ID 0x0519.
 3. Load the new overlay. `media-ctl -p` — does an `imx519 N-001a` entity
    appear and link to the CSI2RX?
 4. `./reload.sh 1280x720 /tmp/shot.raw 1` — first frame at the safe mode.
+   Judge only "is there a frame", nothing about quality yet.
 5. `view.py /tmp/shot.raw /tmp/shot.png 1280x720` — check colour, since a
    red/blue swap means the Bayer code assumption is wrong.
-6. Only then `./reload.sh 1920x1080`, watching for SLBF.
+6. `./reload.sh 1920x1080`, watching for SLBF. This is the mode you
+   actually want; 720p threw away half the lens.
+7. `./focus.sh 1920x1080` — turn the barrel to the peak, lock the ring.
+   **Do not skip this and do not do it before step 6**, or you will have
+   focused on a crop you aren't going to use.
+8. Optionally a flat frame for vignetting:
+   `./reload.sh 1920x1080 /tmp/flat.raw 1` off an evenly lit white sheet,
+   then `view.py shot.raw shot.png 1920x1080 --flat /tmp/flat.raw`.
 
-`view.py` needs no changes at all — the output format is still BGR3 off
-the same frmbuf.
+`view.py` needed no changes for the sensor swap — the output format is
+still BGR3 off the same frmbuf. The `--flat` option is new and is there
+for the lens, not the sensor.

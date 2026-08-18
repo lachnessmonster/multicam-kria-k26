@@ -10,6 +10,32 @@
 # synthesised v_demosaic and v_frmbuf_wr. media-ctl will clamp or the
 # link validator will reject; either way you do not get a frame.
 #
+# FIELD OF VIEW -- READ THIS BEFORE PICKING A MODE.
+# With the manual M12 wide-angle lens, mode choice is an OPTICAL decision
+# as much as a bandwidth one. Every IMX519 mode is read from a different
+# ANALOGUE CROP of the array, not a scaled version of the same frame.
+# Straight from the driver's mode table (supported_modes_10bit):
+#
+#   mode        analogue crop   binning   % of array width
+#   4656x3496   4656x3496       1x1       100.0%
+#   3840x2160   3840x2160       1x1        82.5%
+#   2328x1748   4656x3496       2x2       100.0%
+#   1920x1080   3840x2160       2x2        82.5%   <- reachable
+#   1280x720    2560x1440       2x2        55.0%   <- reachable
+#
+# So 720p is a ~1.5x TELE CROP of 1080p. It is not "the same picture,
+# smaller" -- it sees less of the world. On a lens bought for its wide
+# field that is the opposite of what you want, and it is invisible unless
+# you go looking for it, because both modes fill the frame.
+#
+# 1080p sees roughly 3/4 of the lens's diagonal field; 720p roughly half.
+# The exact angles depend on the lens projection, which the vendor spec
+# does not pin down -- see the Field of view section in README.md.
+#
+# PICK 1920x1080 unless bandwidth forces you down. 720p is the safe mode
+# electrically and the wrong mode optically, and the +11.8% vs +4.8%
+# margin below is what you are trading the field of view for.
+#
 # BANDWIDTH -- this is the thing that changed vs the IMX219.
 # The old note said the IMX219 line period is 18.90 us in every mode.
 # The IMX519 is much faster off the sensor and its line period is per
@@ -102,6 +128,8 @@ if [ "$GOT" != "${W}x${H}" ]; then
     echo "!! asked for ${W}x${H}, sensor snapped to $GOT" >&2
     echo "   IMX519 modes are 4656x3496 3840x2160 2328x1748 1920x1080 1280x720;" >&2
     echo "   only the last two fit MAX_COLS=1920." >&2
+    echo "   Note 2328x1748 would give the FULL lens field of view binned 2x2," >&2
+    echo "   but needs the 2 px/clk fabric rebuild. See README." >&2
     exit 1
 fi
 
