@@ -2,8 +2,13 @@
 # One-shot IMX519 bring-up on the KV260. Run on the board:
 #   chmod +x setup-imx519.sh && ./setup-imx519.sh
 #
+# MANUAL FOCUS M12 module (Arducam B0449 class). No VCM is controlled, so
+# there is no ak7375 node in the overlay. Auxiliary I2C addresses may still
+# exist on some PCB revisions; only the IMX519 at 0x1a is required here.
+#
 # Writes the overlay, compiles it, installs it, reloads the app and
-# verifies the sensor probed. Does NOT capture -- run reload.sh after.
+# verifies the sensor probed. Does NOT capture -- run reload.sh after,
+# and focus.sh once, by hand, before you trust any image.
 set -euo pipefail
 
 APP=kv260-cam
@@ -28,11 +33,14 @@ echo "== 1. writing overlay =="
 cat > $APP.dtso <<'DTSO'
 /dts-v1/;
 /plugin/;
-/* KV260 IMX519 pipeline. Annotated version in devicetree/kv260-cam.dtso.
+/* KV260 IMX519 pipeline, MANUAL FOCUS M12 module. Annotated version in
+ * devicetree/kv260-cam.dtso.
  * link-frequencies 493500000 MUST match rpi-5.15.y IMX519_DEFAULT_LINK_FREQ.
  * assigned-clock-rates 142857142 is 999999990/7, the only reachable rate
  * near 150 MHz on this PLL. max-width/height 1920x1080 are baked into the
- * bitstream: only 1920x1080 and 1280x720 are reachable.
+ * bitstream: only 1920x1080 and 1280x720 are reachable, and both are
+ * analogue CROPS of the array -- 82.5% and 55.0% of full width, so mode
+ * choice costs field of view. No ak7375 node: this module has no VCM.
  */
 &fpga_full {
     firmware-name = "kv260-cam.bit.bin";
@@ -137,12 +145,7 @@ cat > $APP.dtso <<'DTSO'
                     };
                 };
 
-                
-                imx519_vcm: ak7375@c {
-                    compatible = "asahi-kasei,ak7375";
-                    reg = <0x0c>;
-                    status = "disabled";
-                };
+                /* no ak7375@c: manual focus module has no VCM */
             };
 
             i2c@3 { reg = <3>; #address-cells = <1>; #size-cells = <0>; };
@@ -278,15 +281,27 @@ grep pl0 /sys/kernel/debug/clk/clk_summary 2>/dev/null | sudo tee /dev/null || \
 echo "-- imx519 probe --"
 dmesg | grep -i imx519 | tail -10 || true
 
+echo "-- mux channel 2 / i2c-6 (want 1a, or UU when bound) --"
+sudo i2cdetect -y -r 6 2>/dev/null || echo "   (i2cdetect unavailable)"
+
 SENSOR=$(media-ctl -d /dev/media0 -p 2>/dev/null | grep -oE 'imx519 [0-9]+-[0-9a-f]+' | head -1 || true)
 if [ -z "$SENSOR" ]; then
     echo
-    echo "!! no imx519 entity in /dev/media0. Most likely causes, in order:"
-    echo "   1. link-frequency mismatch -- dmesg says 'Link frequency not supported'."
-    echo "      The DT says 493500000; the driver must agree. Check with:"
-    echo "        grep DEFAULT_LINK_FREQ ~/imx519/imx519.c"
-    echo "   2. module not loaded:   lsmod | grep imx519"
-    echo "   3. sensor not on the bus: sudo i2cdetect -y -r 6   (want 1a)"
+    echo "!! no imx519 entity in /dev/media0."
+    if dmesg | grep -qi 'imx519.*failed to read chip id.*error -5'; then
+        echo "   The driver reached 6-001a but the sensor did not ACK."
+        echo "   With a known-good connected module, rebuild the FPGA image:"
+        echo "     make rebuild-and-deploy"
+        echo "   That build forces KV260 HDA09/camera-enable high on F11. A"
+        echo "   floating F11 removes the sensor's 24 MHz INCK and produces"
+        echo "   exactly this -EIO while 0x0c/0x58 may continue to answer."
+    elif dmesg | grep -qi 'imx519.*Link frequency not supported'; then
+        echo "   Link-frequency mismatch: DT and driver must both use 493500000."
+        echo "     grep DEFAULT_LINK_FREQ ~/kmod/imx519.c"
+    else
+        echo "   Check: lsmod | grep imx519"
+        echo "          sudo i2cdetect -y -r 6   # want 1a, or UU if bound"
+    fi
     exit 1
 fi
 
@@ -294,5 +309,17 @@ echo
 echo "OK: $SENSOR"
 media-ctl -d /dev/media0 -p | grep -E '^- entity|imx519|demosaic|csi2|frmbuf' || true
 echo
-echo "Next:  cd ~/newdev/software && ./reload.sh 1280x720 /tmp/shot.raw 1"
-echo "       python3 view.py /tmp/shot.raw /tmp/shot.png 1280x720"
+echo "-- sensor bus (1a may display as UU because the driver owns it) --"
+BUS=$(echo "$SENSOR" | sed -E 's/imx519 ([0-9]+)-.*/\1/')
+sudo i2cdetect -y -r "$BUS" 2>/dev/null || echo "   (i2cdetect unavailable)"
+
+echo
+echo "Next:  cd ~/newdev/software && ./reload.sh 1920x1080 /tmp/shot.raw 1"
+echo "       python3 view.py /tmp/shot.raw /tmp/shot.png 1920x1080"
+echo
+echo "Then FOCUS IT. The lens is manual and ships at an arbitrary position:"
+echo "       ./focus.sh 1920x1080"
+echo "  Turn the lens barrel between iterations, watch the score peak, stop,"
+echo "  lock the retaining ring. Once set it is set -- both reachable modes"
+echo "  are 2x2 binned, so hyperfocal is under a metre and depth of field"
+echo "  runs from roughly 0.5 m to infinity." 

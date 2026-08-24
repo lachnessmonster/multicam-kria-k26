@@ -7,6 +7,18 @@
 # in this design, so the demosaic is never reset between streams. Only
 # peripheral_aresetn (i.e. a full overlay reload) clears it. Use this,
 # not capture.sh, unless you have just loaded the overlay.
+#
+# MODE DEFAULT IS 720p FOR BRING-UP ONLY. It has the electrical margin
+# (+11.8% vs +4.8%) that makes a first frame likely, so it is the right
+# place to prove the pipeline. It is the WRONG place to stay: 720p is
+# read from a 2560x1440 analogue crop against 1080p's 3840x2160, so it
+# sees 55% of the array width against 82.5% -- a ~1.5x tele crop that
+# throws away most of what the wide M12 lens was for. Move to 1080p once
+# it streams. capture.sh has the full mode/crop table.
+#
+# FOCUS IS MANUAL ON THIS MODULE. There is no VCM to drive, and nothing
+# here sets focus. If the image is soft, the barrel is wrong, not the
+# pipeline -- run ./focus.sh before concluding anything else.
 set -euo pipefail
 MODE="${1:-1280x720}"; OUT="${2:-/tmp/frame.raw}"; FRAMES="${3:-1}"
 

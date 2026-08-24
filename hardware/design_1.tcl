@@ -49,7 +49,9 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 set list_projs [get_projects -quiet]
 if { $list_projs eq "" } {
-   create_project project_1 myproj -part xck26-sfvc784-2LV-c
+   # This repository's batch build uses a dedicated build-hw directory.
+   # -force makes `make rebuild-and-deploy` reproducible on later runs.
+   create_project -force project_1 myproj -part xck26-sfvc784-2LV-c
    set_property BOARD_PART xilinx.com:kv260_som:part0:2.0 [current_project]
   set_property BOARD_CONNECTIONS { som240_1_connector xilinx.com:kv260_carrier:som240_1_connector:2.0} [current_project]
 }
@@ -1328,4 +1330,15 @@ Port;FD4A0000;FD4AFFFF;1|FPD;DPDMA;FD4C0000;FD4CFFFF;1|FPD;DDR_XMPU5_CFG;FD05000
 
 create_root_design ""
 
-
+# The generated block-design Tcl creates rpi_cam_en but a BD cannot carry its
+# package-pin assignment.  Import the companion XDC here so a project rebuilt
+# from this script cannot silently leave the KV260 camera-enable output
+# unconstrained.  F11 must be driven high to enable HDA09/the RPi camera path.
+set rpi_cam_xdc [file normalize [file join $script_folder constrs_1.xdc]]
+if {![file exists $rpi_cam_xdc]} {
+  error "Required camera-enable constraint is missing: $rpi_cam_xdc"
+}
+if {[get_files -quiet -of_objects [get_filesets constrs_1] $rpi_cam_xdc] eq ""} {
+  add_files -fileset constrs_1 -norecurse $rpi_cam_xdc
+}
+set_property USED_IN {synthesis implementation} [get_files $rpi_cam_xdc]
