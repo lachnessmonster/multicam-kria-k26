@@ -1,51 +1,5 @@
 #!/bin/bash
-# Native V4L2 capture, RGB straight off the hardware demosaic. IMX519.
-#
-# Usage: ./capture.sh [WxH] [outfile] [nframes]
-#   ./capture.sh 1280x720         <- default, comfortable margin
-#   ./capture.sh 1920x1080        <- works, but only ~9% margin (see below)
-#
-# ONLY 1280x720 AND 1920x1080 ARE REACHABLE. The IMX519's other modes
-# (4656x3496, 3840x2160, 2328x1748) all exceed MAX_COLS=1920 in the
-# synthesised v_demosaic and v_frmbuf_wr. media-ctl will clamp or the
-# link validator will reject; either way you do not get a frame.
-#
-# BANDWIDTH -- this is the thing that changed vs the IMX219.
-# The old note said the IMX219 line period is 18.90 us in every mode.
-# The IMX519 is much faster off the sensor and its line period is per
-# mode. Draining W active pixels at 1 px/clk on pl_clk0 must fit inside
-# it. Measured pl_clk0 is 142.857142 MHz (999999990/7 -- see the clock
-# note in the .dtso; 150 is NOT reachable on this PLL).
-#
-# Numbers below use the rpi-5.15.y driver's constants: PIXEL_RATE
-# 686 MHz, and PPL per mode. The 6.6 branch has different constants
-# for the same modes, so do not mix them.
-#
-#   mode        PPL     line period   drain     margin   min pl_clk0
-#   1920x1080   9689    14.124 us     13.440    +4.8%    135.9 MHz
-#   1280x720    6971    10.162 us      8.960   +11.8%    126.0 MHz
-#
-# IMX219 1080p had +32.3%, so BOTH modes here are a real step down in
-# slack and 1080p is genuinely marginal -- expect it to be intermittent
-# rather than cleanly working or cleanly failing. 720p is the safe mode.
-#
-# Modes needing a fabric rebuild (MAX_COLS>1920), for reference, all
-# comfortable at 2 px/clk on the existing 142.857 MHz:
-#   4656x3496 @10fps  line 24.630 us  2ppc drain 16.296  +33.8%
-#   3840x2160 @21fps  line 21.061 us  2ppc drain 13.440  +36.2%
-#   2328x1748 @30fps  line 13.461 us  2ppc drain  8.148  +39.5%
-#
-# You cannot buy margin back with controls. In the IMX519 driver HBLANK
-# is fixed per mode (__v4l2_ctrl_modify_range(hblank, hblank, hblank,...)),
-# so the line period is not adjustable. VBLANK only lowers frame rate,
-# which does nothing for a per-line buffer. The only levers are a faster
-# pl_clk0, a wider datapath (2 px/clk), or 720p.
-#
-# If SLBF comes back, check the clock FIRST:
-#   sudo cat /sys/kernel/debug/clk/clk_summary | grep pl0
-# Expect 142857142. Below 135.9 MHz means 1080p is arithmetically
-# impossible, not a pipeline bug. Below 126.0 MHz means the same for
-# 720p, i.e. the overlay didn't take at all.
+
 set -euo pipefail
 
 MODE="${1:-1280x720}"
@@ -62,6 +16,7 @@ VIDEO=/dev/video0
 # IMX519: the address (0x1a) and, more annoyingly, the i2c adapter number,
 # which the PCA9546 mux allocates dynamically and which shifts if the
 # probe order changes. Derive it.
+
 SENSOR=$(media-ctl -d "$MEDIA" -p 2>/dev/null \
          | grep -oE 'imx519 [0-9]+-[0-9a-f]+' | head -1)
 if [ -z "$SENSOR" ]; then
