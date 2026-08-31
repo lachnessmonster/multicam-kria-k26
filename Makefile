@@ -1,6 +1,6 @@
 dtbo:
-	@dtc -I dts -O dtb -o files-for-kria/devicetree/camera.dtbo files-for-kria/devicetree/camera.dtso -q
-	@echo "camera.dtbo built."
+	@dtc -I dts -O dtb -o files-for-kria/devicetree/imx519.dtbo files-for-kria/devicetree/imx519.dtso -q
+	@echo "imx519.dtbo built."
 
 bitstream:
 	@mkdir build

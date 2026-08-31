@@ -7,7 +7,7 @@ MODE="${1:-1280x720}"; OUT="${2:-/tmp/frame.raw}"; FRAMES="${3:-1}"
 GAIN="${GAIN:-400}"
 
 sudo xmutil unloadapp
-sudo xmutil loadapp kv260-cam
+sudo xmutil loadapp imx519
 sleep 2
 
 SENSOR=$(media-ctl -d /dev/media0 -p 2>/dev/null \
