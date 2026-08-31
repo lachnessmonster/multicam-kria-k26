@@ -1,6 +1,5 @@
-dtbo: 
-	@mkdir build
-	@dtc -I dts -O dtb -o build/camera.dtbo devicetree/camera.dtso
+dtbo:
+	@dtc -I dts -O dtb -o files-for-kria/devicetree/camera.dtbo files-for-kria/devicetree/camera.dtso -q
 	@echo "camera.dtbo built."
 
 bitstream:
@@ -10,6 +9,10 @@ bitstream:
 
 drivers:
 	@ ./get-drivers.sh
+
+send-to-kria:
+	@ scp -qr files-for-kria unimelb-research@192.168.2.1:~/
+	@ echo "files successfully sent to the kria."
 
 clean:
 	@rm -rf build
