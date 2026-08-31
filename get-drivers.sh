@@ -1,8 +1,4 @@
-case "$(uname -r)" in
-  5.15.*) DEFBRANCH=rpi-5.15.y ;;
-  6.1.*)  DEFBRANCH=rpi-6.1.y  ;;
-  *)      DEFBRANCH=rpi-6.6.y  ;;
-esac
+DEFBRANCH=rpi-5.15.y
 
 BRANCH="${BRANCH:-$DEFBRANCH}"
 
